@@ -441,6 +441,11 @@ body,
   color: var(--crepe-color-on-background);
 }
 
+.milkdown .ProseMirror {
+  padding: 1em 2.7em 1.5em 5.5em !important;
+
+}
+
 /* Scrollbars — source pane (CM) + preview pane (Crepe) + sidebar tree */
 .cm-scroller::-webkit-scrollbar,
 .editor-preview::-webkit-scrollbar,

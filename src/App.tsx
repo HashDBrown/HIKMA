@@ -405,7 +405,7 @@ function App() {
                 editorViewRef.current = view;
               }}
             />
-            <div className="editor-preview min-h-0 overflow-auto border-l border-gray-300 dark:border-gray-800">
+            <div className="editor-preview min-h-0 overflow-auto border-t md:border-t-0 md:border-l border-gray-300 dark:border-gray-800">
               <MilkdownEditor markdown={source} onChange={setSource} filePath={filePath} />
             </div>
           </div>
