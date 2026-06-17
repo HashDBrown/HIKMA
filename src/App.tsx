@@ -10,6 +10,7 @@ import { listen } from "@tauri-apps/api/event";
 import { gutters } from "@codemirror/view";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { FileTree, type FileNode } from "./FileTree";
+import { CommandPalette, FindOverlay } from "./SearchOverlays";
 import "./App.css";
 
 const initialSource = `# Welcome to HIKMA حكمة
@@ -70,11 +71,55 @@ function App() {
   const [systemDark, setSystemDark] = useState(prefersDark.matches);
   const isDark = theme === "system" ? systemDark : theme === "dark";
   
+  const [showCommandPalette, setShowCommandPalette] = useState(false);
+  const [showFindOverlay, setShowFindOverlay] = useState(false);
+  const [editorView, setEditorView] = useState<EditorView | null>(null);
+
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [tempFileName, setTempFileName] = useState("");
+  const [copied, setCopied] = useState(false);
 
   const editorViewRef = useRef<EditorView | null>(null);
 
   const dirty = source !== savedSource;
-  const fileName = filePath ? baseName(filePath) : "Untitled";
+  const fileName = filePath ? baseName(filePath) : (tempFileName || "Untitled");
+
+  const handleCopy = useCallback(async () => {
+    try {
+      await navigator.clipboard.writeText(source);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 2000);
+    } catch (err) {
+      console.error("Failed to copy:", err);
+    }
+  }, [source]);
+
+  const handleRename = useCallback(async () => {
+    setIsEditingName(false);
+    if (!tempFileName || tempFileName === fileName.replace(/\.md$/, "")) return;
+
+    if (!filePath) {
+      // Just updating the suggested name for Untitled
+      return;
+    }
+
+    try {
+      const parentDir = dirName(filePath);
+      const ext = filePath.includes(".") ? filePath.split(".").pop() : "md";
+      const newPath = `${parentDir}/${tempFileName}.${ext}`;
+      
+      await invoke("rename_file", { oldPath: filePath, newPath });
+      setFilePath(newPath);
+    } catch (err) {
+      await message(`Could not rename file:\n${err}`, { title: "Rename failed", kind: "error" });
+      setTempFileName(fileName.replace(/\.md$/, ""));
+    }
+  }, [tempFileName, fileName, filePath]);
+
+  const startEditing = useCallback(() => {
+    setTempFileName(fileName.replace(/\.md$/, ""));
+    setIsEditingName(true);
+  }, [fileName]);
 
   // Latest state for the stable window/keyboard listeners registered once below
   const stateRef = useRef({ source, filePath, dirty });
@@ -87,8 +132,6 @@ function App() {
     prefersDark.addEventListener("change", onChange);
     return () => prefersDark.removeEventListener("change", onChange);
   }, []);
-
-  
 
   const updateRecentFiles = useCallback((update: (prev: string[]) => string[]) => {
     setRecentFiles((prev) => {
@@ -281,11 +324,28 @@ function App() {
       } else if (key === "s") {
         e.preventDefault();
         void (e.shiftKey ? saveFileAs() : saveFile());
+      } else if (key === "k") {
+        e.preventDefault();
+        setShowCommandPalette(true);
+      } else if (key === "f") {
+        e.preventDefault();
+        setShowFindOverlay(true);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [newFile, openFile, openWorkspace, saveFile, saveFileAs, insertText]);
+
+  useEffect(() => {
+    const handleGlobalEsc = (e: KeyboardEvent) => {
+      if (e.key === "Escape") {
+        setShowCommandPalette(false);
+        setShowFindOverlay(false);
+      }
+    };
+    window.addEventListener("keydown", handleGlobalEsc);
+    return () => window.removeEventListener("keydown", handleGlobalEsc);
+  }, []);
 
   useEffect(() => {
     if (!isTauri) return;
@@ -320,13 +380,46 @@ function App() {
 
   return (
     <div className="app">
+      <CommandPalette
+        isOpen={showCommandPalette}
+        onClose={() => setShowCommandPalette(false)}
+        workspace={workspace}
+        recentFiles={recentFiles}
+        onOpenFile={(path) => void openFile(path)}
+      />
       <header className="toolbar">
         <span className="toolbar-brand">HIKMA <span className="toolbar-brand-ar">حكمة</span></span>
-        <span className="toolbar-file" title={filePath ?? undefined}>
-          {fileName}
-          {dirty && <span className="toolbar-dirty">●</span>}
-        </span>
+        <div className="toolbar-file-container">
+          {isEditingName ? (
+            <input
+              className="toolbar-file-input"
+              value={tempFileName}
+              onChange={(e) => setTempFileName(e.target.value)}
+              onBlur={handleRename}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") handleRename();
+                if (e.key === "Escape") {
+                  setIsEditingName(false);
+                  setTempFileName(fileName.replace(/\.md$/, ""));
+                }
+              }}
+              autoFocus
+            />
+          ) : (
+            <span 
+              className="toolbar-file" 
+              title={filePath ?? "Click to rename"}
+              onClick={startEditing}
+            >
+              {fileName}
+              {dirty && <span className="toolbar-dirty">●</span>}
+            </span>
+          )}
+        </div>
         <div className="toolbar-actions">
+          <button className="toolbar-btn" onClick={handleCopy} title="Copy Markdown">
+            {copied ? "✓" : "Copy"}
+          </button>
           <button className="toolbar-btn" onClick={() => void openFile()}>Open</button>
           <button className="toolbar-btn" onClick={() => void openWorkspace()}>Open Folder</button>
           <div className="toolbar-recent" onClick={(e) => e.stopPropagation()}>
@@ -392,7 +485,12 @@ function App() {
           </aside>
         )}
         <main className="editor grow min-h-0">
-          <div className="editor-whole grid h-full grid-rows-2 md:grid-cols-2 md:grid-rows-1 border-gray-300 dark:border-gray-800">
+          <div className="editor-whole grid h-full grid-rows-2 md:grid-cols-2 md:grid-rows-1 border-gray-300 dark:border-gray-800 relative">
+            <FindOverlay
+              isOpen={showFindOverlay}
+              onClose={() => setShowFindOverlay(false)}
+              editorView={editorView}
+            />
             <CodeMirror
               className="editor-source min-h-0 overflow-auto"
               value={source}
@@ -403,6 +501,7 @@ function App() {
               onChange={(value) => setSource(value)}
               onCreateEditor={(view) => {
                 editorViewRef.current = view;
+                setEditorView(view);
               }}
             />
             <div className="editor-preview min-h-0 overflow-auto border-t md:border-t-0 md:border-l border-gray-300 dark:border-gray-800">
