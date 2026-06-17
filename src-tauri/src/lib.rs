@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager};
 
 #[tauri::command]
@@ -209,27 +209,7 @@ pub fn run() {
                 "Hikma",
                 true,
                 &[
-                    &PredefinedMenuItem::about(
-                        app,
-                        None,
-                        Some(AboutMetadata {
-                            name: Some("Hikma".to_string()),
-                            version: Some(app.package_info().version.to_string()),
-                            copyright: Some("© 2026 Hikma Team".to_string()),
-                            comments: Some(format!(
-                                "{}\n\n{}\n{}\n{}\n{}",
-                                "A modern, polished Markdown editor.",
-                                "    ╱|、",
-                                "  (˚ˎ 。7",
-                                "   |、˜〵",
-                                "  じしˍ,)ノ"
-                            )),
-                            website: Some("https://github.com/HashDBrown/HIKMA".to_string()),
-                            website_label: Some("GitHub Repository".to_string()),
-                            icon: app.default_window_icon().cloned(),
-                            ..Default::default()
-                        }),
-                    )?,
+                    &MenuItem::with_id(app, "about", "About Hikma", true, None::<&str>)?,
                     &PredefinedMenuItem::separator(app)?,
                     &PredefinedMenuItem::services(app, None)?,
                     &PredefinedMenuItem::separator(app)?,
@@ -414,6 +394,9 @@ pub fn run() {
             app.set_menu(menu)?;
 
             app.on_menu_event(move |app, event| match event.id.as_ref() {
+                "about" => {
+                    let _ = app.emit("menu-about", ());
+                }
                 "new" => {
                     let _ = app.emit("menu-new", ());
                 }
