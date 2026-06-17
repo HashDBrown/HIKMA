@@ -135,7 +135,7 @@ fn search_recursive(path: &Path, query: &str, matches: &mut Vec<ContentMatch>) {
         for entry in entries.flatten() {
             let child_path = entry.path();
             let name = child_path.file_name().unwrap_or_default().to_string_lossy();
-            
+
             if IGNORE.contains(&name.as_ref()) {
                 continue;
             }
@@ -143,7 +143,9 @@ fn search_recursive(path: &Path, query: &str, matches: &mut Vec<ContentMatch>) {
             if child_path.is_dir() {
                 search_recursive(&child_path, query, matches);
             } else {
-                let ext = child_path.extension().map(|e| e.to_string_lossy().to_lowercase());
+                let ext = child_path
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_lowercase());
                 if let Some(e) = ext {
                     if ["md", "markdown", "txt"].contains(&e.as_str()) {
                         if let Ok(content) = fs::read_to_string(&child_path) {
@@ -155,14 +157,18 @@ fn search_recursive(path: &Path, query: &str, matches: &mut Vec<ContentMatch>) {
                                         line_number: idx + 1,
                                         line_content: line.trim().to_string(),
                                     });
-                                    if matches.len() > 50 { return; }
+                                    if matches.len() > 50 {
+                                        return;
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            if matches.len() > 50 { return; }
+            if matches.len() > 50 {
+                return;
+            }
         }
     }
 }
