@@ -3,7 +3,7 @@ use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
-use tauri::menu::{AboutMetadata, Menu, MenuItem, PredefinedMenuItem, Submenu};
+use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager};
 
 #[tauri::command]
@@ -135,7 +135,7 @@ fn search_recursive(path: &Path, query: &str, matches: &mut Vec<ContentMatch>) {
         for entry in entries.flatten() {
             let child_path = entry.path();
             let name = child_path.file_name().unwrap_or_default().to_string_lossy();
-            
+
             if IGNORE.contains(&name.as_ref()) {
                 continue;
             }
@@ -143,7 +143,9 @@ fn search_recursive(path: &Path, query: &str, matches: &mut Vec<ContentMatch>) {
             if child_path.is_dir() {
                 search_recursive(&child_path, query, matches);
             } else {
-                let ext = child_path.extension().map(|e| e.to_string_lossy().to_lowercase());
+                let ext = child_path
+                    .extension()
+                    .map(|e| e.to_string_lossy().to_lowercase());
                 if let Some(e) = ext {
                     if ["md", "markdown", "txt"].contains(&e.as_str()) {
                         if let Ok(content) = fs::read_to_string(&child_path) {
@@ -155,14 +157,18 @@ fn search_recursive(path: &Path, query: &str, matches: &mut Vec<ContentMatch>) {
                                         line_number: idx + 1,
                                         line_content: line.trim().to_string(),
                                     });
-                                    if matches.len() > 50 { return; }
+                                    if matches.len() > 50 {
+                                        return;
+                                    }
                                 }
                             }
                         }
                     }
                 }
             }
-            if matches.len() > 50 { return; }
+            if matches.len() > 50 {
+                return;
+            }
         }
     }
 }
@@ -209,27 +215,7 @@ pub fn run() {
                 "Hikma",
                 true,
                 &[
-                    &PredefinedMenuItem::about(
-                        app,
-                        None,
-                        Some(AboutMetadata {
-                            name: Some("Hikma".to_string()),
-                            version: Some(app.package_info().version.to_string()),
-                            copyright: Some("© 2026 Hikma Team".to_string()),
-                            comments: Some(format!(
-                                "{}\n\n{}\n{}\n{}\n{}",
-                                "A modern, polished Markdown editor.",
-                                "    ╱|、",
-                                "  (˚ˎ 。7",
-                                "   |、˜〵",
-                                "  じしˍ,)ノ"
-                            )),
-                            website: Some("https://github.com/HashDBrown/HIKMA".to_string()),
-                            website_label: Some("GitHub Repository".to_string()),
-                            icon: app.default_window_icon().cloned(),
-                            ..Default::default()
-                        }),
-                    )?,
+                    &MenuItem::with_id(app, "about", "About Hikma", true, None::<&str>)?,
                     &PredefinedMenuItem::separator(app)?,
                     &PredefinedMenuItem::services(app, None)?,
                     &PredefinedMenuItem::separator(app)?,
@@ -414,6 +400,9 @@ pub fn run() {
             app.set_menu(menu)?;
 
             app.on_menu_event(move |app, event| match event.id.as_ref() {
+                "about" => {
+                    let _ = app.emit("menu-about", ());
+                }
                 "new" => {
                     let _ = app.emit("menu-new", ());
                 }

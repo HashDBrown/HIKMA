@@ -11,9 +11,19 @@ import { gutters } from "@codemirror/view";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { FileTree, type FileNode } from "./FileTree";
 import { CommandPalette, FindOverlay } from "./SearchOverlays";
+import { AboutDialog } from "./AboutDialog";
 import "./App.css";
 
 const initialSource = `# Welcome to HIKMA حكمة
+
+> حكمة — wisdom in every edit
+
+\`\`\`
+       ╱|、
+      (˚ˎ 。7
+       |、˜〵
+      じしˍ,)ノ
+\`\`\`
 
 Start typing **Markdown** on the left — the preview updates on the right.
 
@@ -49,6 +59,11 @@ function baseName(path: string) {
   return path.split(/[/\\]/).pop() ?? path;
 }
 
+// Ensure a file name carries a Markdown extension, defaulting to .md
+function withMarkdownExt(name: string) {
+  return /\.(md|markdown|txt)$/i.test(name) ? name : `${name}.md`;
+}
+
 function dirName(path: string) {
   const idx = Math.max(path.lastIndexOf("/"), path.lastIndexOf("\\"));
   return idx === -1 ? path : path.slice(0, idx);
@@ -66,18 +81,20 @@ function App() {
   const [workspace, setWorkspace] = useState<FileNode | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [recentFiles, setRecentFiles] = useState<string[]>(loadRecentFiles);
-  const [recentOpen, setRecentOpen] = useState(false);
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [systemDark, setSystemDark] = useState(prefersDark.matches);
   const isDark = theme === "system" ? systemDark : theme === "dark";
   
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showFindOverlay, setShowFindOverlay] = useState(false);
+  const [showAbout, setShowAbout] = useState(false);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
 
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempFileName, setTempFileName] = useState("");
   const [copied, setCopied] = useState(false);
+  const nameBeforeEditRef = useRef("");
 
   const editorViewRef = useRef<EditorView | null>(null);
 
@@ -96,30 +113,39 @@ function App() {
 
   const handleRename = useCallback(async () => {
     setIsEditingName(false);
-    if (!tempFileName || tempFileName === fileName.replace(/\.md$/, "")) return;
+    const newName = withMarkdownExt(tempFileName.trim());
+    if (!tempFileName.trim() || newName === fileName) return;
 
     if (!filePath) {
-      // Just updating the suggested name for Untitled
+      // No file on disk yet — keep the name (with extension) as the suggestion for Save As
+      setTempFileName(newName);
       return;
     }
 
     try {
       const parentDir = dirName(filePath);
-      const ext = filePath.includes(".") ? filePath.split(".").pop() : "md";
-      const newPath = `${parentDir}/${tempFileName}.${ext}`;
-      
+      const newPath = `${parentDir}/${newName}`;
+
       await invoke("rename_file", { oldPath: filePath, newPath });
       setFilePath(newPath);
     } catch (err) {
       await message(`Could not rename file:\n${err}`, { title: "Rename failed", kind: "error" });
-      setTempFileName(fileName.replace(/\.md$/, ""));
+      setTempFileName(baseName(filePath));
     }
   }, [tempFileName, fileName, filePath]);
 
   const startEditing = useCallback(() => {
-    setTempFileName(fileName.replace(/\.md$/, ""));
+    // Remember the current name so Escape can restore it cleanly
+    nameBeforeEditRef.current = filePath ? baseName(filePath) : tempFileName;
+    // Show the full name including its extension so the user can edit it directly
+    setTempFileName(withMarkdownExt(fileName));
     setIsEditingName(true);
-  }, [fileName]);
+  }, [fileName, filePath, tempFileName]);
+
+  const cancelEditing = useCallback(() => {
+    setIsEditingName(false);
+    setTempFileName(nameBeforeEditRef.current);
+  }, []);
 
   // Latest state for the stable window/keyboard listeners registered once below
   const stateRef = useRef({ source, filePath, dirty });
@@ -164,7 +190,7 @@ function App() {
         window.alert("File open/save needs the desktop app — run `npm run tauri dev`.");
         return;
       }
-      setRecentOpen(false);
+      setFileMenuOpen(false);
       if (!(await confirmDiscard())) return;
       const target =
         path ?? (await openDialog({ multiple: false, directory: false, filters: markdownFilters }));
@@ -307,6 +333,7 @@ function App() {
       listen("menu-report-issue", () => {
         window.open("https://github.com/HashDBrown/HIKMA/issues", "_blank");
       }),
+      listen("menu-about", () => setShowAbout(true)),
     ];
 
     return () => {
@@ -372,11 +399,11 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!recentOpen) return;
-    const onClick = () => setRecentOpen(false);
+    if (!fileMenuOpen) return;
+    const onClick = () => setFileMenuOpen(false);
     window.addEventListener("click", onClick);
     return () => window.removeEventListener("click", onClick);
-  }, [recentOpen]);
+  }, [fileMenuOpen]);
 
   return (
     <div className="app">
@@ -387,6 +414,7 @@ function App() {
         recentFiles={recentFiles}
         onOpenFile={(path) => void openFile(path)}
       />
+      <AboutDialog isOpen={showAbout} onClose={() => setShowAbout(false)} />
       <header className="toolbar">
         <span className="toolbar-brand">HIKMA <span className="toolbar-brand-ar">حكمة</span></span>
         <div className="toolbar-file-container">
@@ -398,10 +426,7 @@ function App() {
               onBlur={handleRename}
               onKeyDown={(e) => {
                 if (e.key === "Enter") handleRename();
-                if (e.key === "Escape") {
-                  setIsEditingName(false);
-                  setTempFileName(fileName.replace(/\.md$/, ""));
-                }
+                if (e.key === "Escape") cancelEditing();
               }}
               autoFocus
             />
@@ -420,36 +445,97 @@ function App() {
           <button className="toolbar-btn" onClick={handleCopy} title="Copy Markdown">
             {copied ? "✓" : "Copy"}
           </button>
-          <button className="toolbar-btn" onClick={() => void openFile()}>Open</button>
-          <button className="toolbar-btn" onClick={() => void openWorkspace()}>Open Folder</button>
-          <div className="toolbar-recent" onClick={(e) => e.stopPropagation()}>
+          <div className="toolbar-menu" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
               className="toolbar-btn"
               aria-haspopup="menu"
-              aria-expanded={recentOpen}
-              aria-controls="recent-menu"
-              disabled={recentFiles.length === 0}
-              onClick={() => setRecentOpen((open) => !open)}
+              aria-expanded={fileMenuOpen}
+              aria-controls="file-menu"
+              onClick={() => setFileMenuOpen((open) => !open)}
             >
-              Recent ▾
+              File ▾
             </button>
-            {recentOpen && (
-              <ul id="recent-menu" role="menu" className="toolbar-recent-menu">
-                {recentFiles.map((path) => (
-                  <li key={path}>
-                    <button title={path} onClick={() => void openFile(path)}>
-                      {baseName(path)}
-                    </button>
-                  </li>
-                ))}
+            {fileMenuOpen && (
+              <ul id="file-menu" role="menu" className="toolbar-menu-list">
+                <li>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      void newFile();
+                    }}
+                  >
+                    <span>New File</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      void openFile();
+                    }}
+                  >
+                    <span>Open…</span>
+                    <span className="toolbar-shortcut">⌘O</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      void openWorkspace();
+                    }}
+                  >
+                    <span>Open Folder…</span>
+                    <span className="toolbar-shortcut">⇧⌘O</span>
+                  </button>
+                </li>
+                <li className="toolbar-menu-divider" role="separator" />
+                <li>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      void saveFile();
+                    }}
+                  >
+                    <span>Save</span>
+                    <span className="toolbar-shortcut">⌘S</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      void saveFileAs();
+                    }}
+                  >
+                    <span>Save As…</span>
+                    <span className="toolbar-shortcut">⇧⌘S</span>
+                  </button>
+                </li>
+                {recentFiles.length > 0 && (
+                  <>
+                    <li className="toolbar-menu-divider" role="separator" />
+                    <li className="toolbar-menu-label">Recent</li>
+                    {recentFiles.map((path) => (
+                      <li key={path}>
+                        <button role="menuitem" title={path} onClick={() => void openFile(path)}>
+                          <span className="toolbar-menu-ellipsis">{baseName(path)}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </>
+                )}
               </ul>
             )}
           </div>
-          <button className="toolbar-btn" onClick={() => void saveFile()}>Save</button>
-          <button className="toolbar-btn" onClick={() => void saveFileAs()}>Save As</button>
+          <span className="toolbar-mode">Markdown</span>
         </div>
-        <span className="toolbar-mode">Markdown</span>
       </header>
       <div className="app-body">
         {workspace && !sidebarOpen && (
