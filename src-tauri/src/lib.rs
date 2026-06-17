@@ -106,6 +106,67 @@ fn read_dir_tree(path: String) -> Result<FileNode, String> {
     read_node(Path::new(&path), 0).ok_or_else(|| "could not read directory".to_string())
 }
 
+#[derive(Serialize)]
+struct ContentMatch {
+    path: String,
+    name: String,
+    line_number: usize,
+    line_content: String,
+}
+
+#[tauri::command]
+fn search_content(path: String, query: String) -> Result<Vec<ContentMatch>, String> {
+    if query.trim().len() < 2 {
+        return Ok(Vec::new());
+    }
+    let mut matches = Vec::new();
+    let root = Path::new(&path);
+    search_recursive(root, &query.to_lowercase(), &mut matches);
+    Ok(matches)
+}
+
+#[tauri::command]
+fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
+    fs::rename(old_path, new_path).map_err(|e| e.to_string())
+}
+
+fn search_recursive(path: &Path, query: &str, matches: &mut Vec<ContentMatch>) {
+    if let Ok(entries) = fs::read_dir(path) {
+        for entry in entries.flatten() {
+            let child_path = entry.path();
+            let name = child_path.file_name().unwrap_or_default().to_string_lossy();
+            
+            if IGNORE.contains(&name.as_ref()) {
+                continue;
+            }
+
+            if child_path.is_dir() {
+                search_recursive(&child_path, query, matches);
+            } else {
+                let ext = child_path.extension().map(|e| e.to_string_lossy().to_lowercase());
+                if let Some(e) = ext {
+                    if ["md", "markdown", "txt"].contains(&e.as_str()) {
+                        if let Ok(content) = fs::read_to_string(&child_path) {
+                            for (idx, line) in content.lines().enumerate() {
+                                if line.to_lowercase().contains(query) {
+                                    matches.push(ContentMatch {
+                                        path: child_path.to_string_lossy().into_owned(),
+                                        name: name.to_string(),
+                                        line_number: idx + 1,
+                                        line_content: line.trim().to_string(),
+                                    });
+                                    if matches.len() > 50 { return; }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+            if matches.len() > 50 { return; }
+        }
+    }
+}
+
 //tracks the directories already granted asset access this session, so we don't keep re-adding overlapping grants.
 #[derive(Default)]
 struct AssetGrants(Mutex<Vec<PathBuf>>);
@@ -427,6 +488,8 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             greet,
             read_dir_tree,
+            search_content,
+            rename_file,
             allow_asset_dir
         ])
         .run(tauri::generate_context!())
