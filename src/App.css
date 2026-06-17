@@ -60,15 +60,41 @@ body,
 }
 
 .toolbar-file {
+  font: inherit;
   font-size: 0.75rem;
   color: #aaa;
   min-width: 0;
+  max-width: 40vw;
   display: flex;
   align-items: center;
   gap: 0.35rem;
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 8px;
+  cursor: text;
+}
+
+.toolbar-file:hover {
+  background: #1b1b2c;
+  border-color: #2a2a3e;
+  color: #fff;
+}
+
+.toolbar-file-input {
+  font: inherit;
+  font-size: 0.75rem;
+  color: #fff;
+  min-width: 0;
+  max-width: 40vw;
+  background: #1b1b2c;
+  border: 1px solid #c9a84c;
+  border-radius: 4px;
+  padding: 2px 8px;
+  outline: none;
 }
 
 .toolbar-dirty {
@@ -106,18 +132,19 @@ body,
   cursor: default;
 }
 
-.toolbar-recent {
+.toolbar-menu {
   position: relative;
 }
 
-.toolbar-recent-menu {
+.toolbar-menu-list {
   position: absolute;
   top: calc(100% + 6px);
-  left: 0;
+  right: 0;
   z-index: 10;
-  min-width: 180px;
+  min-width: 200px;
   max-width: 320px;
   list-style: none;
+  margin: 0;
   background: #1b1b2c;
   border: 1px solid #2a2a3e;
   border-radius: 6px;
@@ -125,26 +152,51 @@ body,
   box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
 }
 
-.toolbar-recent-menu button {
+.toolbar-menu-list button {
   font: inherit;
   font-size: 0.75rem;
-  display: block;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1.5rem;
   width: 100%;
   text-align: left;
   color: #ccc;
   background: none;
   border: none;
   border-radius: 4px;
-  padding: 4px 8px;
+  padding: 5px 8px;
   cursor: pointer;
+}
+
+.toolbar-menu-list button:hover {
+  background: #2e2e4a;
+  color: #fff;
+}
+
+.toolbar-menu-ellipsis {
   white-space: nowrap;
   overflow: hidden;
   text-overflow: ellipsis;
 }
 
-.toolbar-recent-menu button:hover {
-  background: #2e2e4a;
-  color: #fff;
+.toolbar-shortcut {
+  color: #777;
+  font-size: 0.7rem;
+}
+
+.toolbar-menu-divider {
+  height: 1px;
+  margin: 4px 0;
+  background: #2a2a3e;
+}
+
+.toolbar-menu-label {
+  font-size: 0.65rem;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  color: #777;
+  padding: 4px 8px 2px;
 }
 
 .toolbar-mode {

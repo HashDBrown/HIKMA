@@ -3,13 +3,22 @@ import CodeMirror from "@uiw/react-codemirror";
 import { markdown } from "@codemirror/lang-markdown";
 import { languages } from "@codemirror/language-data";
 import { ask, message, open as openDialog, save as saveDialog } from "@tauri-apps/plugin-dialog";
-import { readTextFile, writeTextFile } from "@tauri-apps/plugin-fs";
+import { readTextFile, writeTextFile, rename } from "@tauri-apps/plugin-fs";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { gutters } from "@codemirror/view";
 import { MilkdownEditor } from "./MilkdownEditor";
 import "./App.css";
 
 const initialSource = `# Welcome to HIKMA حكمة
+
+> حكمة — wisdom in every edit
+
+\`\`\`
+       ╱|、
+      (˚ˎ 。7
+       |、˜〵
+      じしˍ,)ノ
+\`\`\`
 
 Start typing **Markdown** on the left — the preview updates on the right.
 
@@ -45,21 +54,36 @@ function baseName(path: string) {
   return path.split(/[/\\]/).pop() ?? path;
 }
 
+// Directory portion of a path, including the trailing separator (empty if none)
+function dirName(path: string) {
+  return path.slice(0, path.length - baseName(path).length);
+}
+
+function withMarkdownExt(name: string) {
+  return /\.(md|markdown|txt)$/i.test(name) ? name : `${name}.md`;
+}
+
 function App() {
   const [source, setSource] = useState(initialSource);
   const [savedSource, setSavedSource] = useState(initialSource);
   const [filePath, setFilePath] = useState<string | null>(null);
+  const [draftName, setDraftName] = useState<string | null>(null);
   const [recentFiles, setRecentFiles] = useState<string[]>(loadRecentFiles);
-  const [recentOpen, setRecentOpen] = useState(false);
+  const [fileMenuOpen, setFileMenuOpen] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [nameDraft, setNameDraft] = useState("");
   const [isDark, setIsDark] = useState(prefersDark.matches);
 
+  // Set when Escape ends an edit, so the resulting blur doesn't commit the change
+  const cancelEditRef = useRef(false);
+
   const dirty = source !== savedSource;
-  const fileName = filePath ? baseName(filePath) : "Untitled";
+  const fileName = filePath ? baseName(filePath) : draftName ?? "Untitled";
 
   // Latest state for the stable window/keyboard listeners registered once below
-  const stateRef = useRef({ source, filePath, dirty });
+  const stateRef = useRef({ source, filePath, dirty, draftName });
   useEffect(() => {
-    stateRef.current = { source, filePath, dirty };
+    stateRef.current = { source, filePath, dirty, draftName };
   });
 
   useEffect(() => {
@@ -99,7 +123,7 @@ function App() {
         window.alert("File open/save needs the desktop app — run `npm run tauri dev`.");
         return;
       }
-      setRecentOpen(false);
+      setFileMenuOpen(false);
       if (!(await confirmDiscard())) return;
       const target =
         path ?? (await openDialog({ multiple: false, directory: false, filters: markdownFilters }));
@@ -123,8 +147,11 @@ function App() {
       window.alert("File open/save needs the desktop app — run `npm run tauri dev`.");
       return false;
     }
+    const fallbackName = stateRef.current.draftName
+      ? withMarkdownExt(stateRef.current.draftName)
+      : "Untitled.md";
     const target = await saveDialog({
-      defaultPath: stateRef.current.filePath ?? "Untitled.md",
+      defaultPath: stateRef.current.filePath ?? fallbackName,
       filters: markdownFilters,
     });
     if (!target) return false;
@@ -152,6 +179,40 @@ function App() {
       return false;
     }
   }, [saveFileAs]);
+
+  const startEditingName = useCallback(() => {
+    setFileMenuOpen(false);
+    setNameDraft(fileName);
+    setEditingName(true);
+  }, [fileName]);
+
+  const commitName = useCallback(
+    async (raw: string) => {
+      setEditingName(false);
+      const path = stateRef.current.filePath;
+      const name = withMarkdownExt(raw.trim());
+      if (!raw.trim()) return;
+
+      // Unsaved document: remember the chosen name for the next Save As
+      if (!path) {
+        setDraftName(name);
+        return;
+      }
+      if (name === baseName(path)) return;
+
+      const newPath = dirName(path) + name;
+      try {
+        await rename(path, newPath);
+        setFilePath(newPath);
+        updateRecentFiles((prev) =>
+          [newPath, ...prev.filter((p) => p !== path && p !== newPath)].slice(0, MAX_RECENT),
+        );
+      } catch (err) {
+        await message(`Could not rename to ${name}:\n${err}`, { title: "Rename failed", kind: "error" });
+      }
+    },
+    [updateRecentFiles],
+  );
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
@@ -194,50 +255,115 @@ function App() {
   }, []);
 
   useEffect(() => {
-    if (!recentOpen) return;
-    const onClick = () => setRecentOpen(false);
+    if (!fileMenuOpen) return;
+    const onClick = () => setFileMenuOpen(false);
     window.addEventListener("click", onClick);
     return () => window.removeEventListener("click", onClick);
-  }, [recentOpen]);
+  }, [fileMenuOpen]);
 
   return (
     <div className="app">
       <header className="toolbar">
         <span className="toolbar-brand">HIKMA <span className="toolbar-brand-ar">حكمة</span></span>
-        <span className="toolbar-file" title={filePath ?? undefined}>
-          {fileName}
-          {dirty && <span className="toolbar-dirty">●</span>}
-        </span>
+        {editingName ? (
+          <input
+            className="toolbar-file-input"
+            autoFocus
+            value={nameDraft}
+            spellCheck={false}
+            aria-label="File name"
+            onChange={(e) => setNameDraft(e.target.value)}
+            onFocus={(e) => e.currentTarget.select()}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") {
+                e.currentTarget.blur();
+              } else if (e.key === "Escape") {
+                cancelEditRef.current = true;
+                e.currentTarget.blur();
+              }
+            }}
+            onBlur={() => {
+              if (cancelEditRef.current) {
+                cancelEditRef.current = false;
+                setEditingName(false);
+                return;
+              }
+              void commitName(nameDraft);
+            }}
+          />
+        ) : (
+          <button
+            type="button"
+            className="toolbar-file"
+            title={`${filePath ?? "Unsaved document"} — click to rename`}
+            onClick={startEditingName}
+          >
+            {fileName}
+            {dirty && <span className="toolbar-dirty">●</span>}
+          </button>
+        )}
         <div className="toolbar-actions">
-          <button className="toolbar-btn" onClick={() => void openFile()}>Open</button>
-          <div className="toolbar-recent" onClick={(e) => e.stopPropagation()}>
+          <div className="toolbar-menu" onClick={(e) => e.stopPropagation()}>
             <button
               type="button"
               className="toolbar-btn"
               aria-haspopup="menu"
-              aria-expanded={recentOpen}
-              aria-controls="recent-menu"
-              disabled={recentFiles.length === 0}
-              onClick={() => setRecentOpen((open) => !open)}
+              aria-expanded={fileMenuOpen}
+              aria-controls="file-menu"
+              onClick={() => setFileMenuOpen((open) => !open)}
             >
-              Recent ▾
+              File ▾
             </button>
-            {recentOpen && (
-              <ul id="recent-menu" role="menu" className="toolbar-recent-menu">
-                {recentFiles.map((path) => (
-                  <li key={path}>
-                    <button title={path} onClick={() => void openFile(path)}>
-                      {baseName(path)}
-                    </button>
-                  </li>
-                ))}
+            {fileMenuOpen && (
+              <ul id="file-menu" role="menu" className="toolbar-menu-list">
+                <li>
+                  <button role="menuitem" onClick={() => void openFile()}>
+                    <span>Open…</span>
+                    <span className="toolbar-shortcut">⌘O</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      void saveFile();
+                    }}
+                  >
+                    <span>Save</span>
+                    <span className="toolbar-shortcut">⌘S</span>
+                  </button>
+                </li>
+                <li>
+                  <button
+                    role="menuitem"
+                    onClick={() => {
+                      setFileMenuOpen(false);
+                      void saveFileAs();
+                    }}
+                  >
+                    <span>Save As…</span>
+                    <span className="toolbar-shortcut">⇧⌘S</span>
+                  </button>
+                </li>
+                {recentFiles.length > 0 && (
+                  <>
+                    <li className="toolbar-menu-divider" role="separator" />
+                    <li className="toolbar-menu-label">Recent</li>
+                    {recentFiles.map((path) => (
+                      <li key={path}>
+                        <button role="menuitem" title={path} onClick={() => void openFile(path)}>
+                          <span className="toolbar-menu-ellipsis">{baseName(path)}</span>
+                        </button>
+                      </li>
+                    ))}
+                  </>
+                )}
               </ul>
             )}
           </div>
-          <button className="toolbar-btn" onClick={() => void saveFile()}>Save</button>
-          <button className="toolbar-btn" onClick={() => void saveFileAs()}>Save As</button>
+          <span className="toolbar-mode">Markdown</span>
         </div>
-        <span className="toolbar-mode">Markdown</span>
       </header>
       <main className="editor grow min-h-0">
         <div className="editor-whole grid h-full grid-rows-2 md:grid-cols-2 md:grid-rows-1 border-gray-300 dark:border-gray-600">
