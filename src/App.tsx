@@ -650,7 +650,7 @@ function App() {
                   height="100%"
                   theme={isDark ? "dark" : "light"}
                   basicSetup={{ lineNumbers: true, foldGutter: false }}
-                  extensions={[markdown({ codeLanguages: languages }), gutters({ fixed: false })]}
+                  extensions={[markdown({ codeLanguages: languages }), gutters({ fixed: false }), EditorView.lineWrapping]}
                   onChange={(value) => setSource(value)}
                   onCreateEditor={(view) => {
                     editorViewRef.current = view;

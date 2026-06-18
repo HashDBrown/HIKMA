@@ -519,7 +519,7 @@ body,
 /* Padding goes on .cm-content (not .cm-scroller) so the sticky line-number
    gutter stays flush against the edge during horizontal scroll. */
 .editor-source .cm-content {
-  padding: 1.25em;
+  padding: 0.8em;
 }
 
 
