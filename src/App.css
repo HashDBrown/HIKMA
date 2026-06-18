@@ -458,9 +458,49 @@ body,
   min-width: 0;     /* lets the editor shrink beside the sidebar */
 }
 
+.editor-layout {
+  display: flex;
+  height: 100%;
+  width: 100%;
+  position: relative;
+}
+
+.editor-pane {
+  min-width: 0;
+  height: 100%;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.editor-resizer {
+  width: 4px;
+  cursor: col-resize;
+  background: var(--toolbar-border);
+  flex-shrink: 0;
+  transition: background 0.2s;
+  position: relative;
+  z-index: 10;
+}
+
+.editor-resizer:hover,
+.editor-resizer.dragging {
+  background: var(--sidebar-active-bg);
+}
+
+/* Invisible wider hit area for the resizer */
+.editor-resizer::after {
+  content: "";
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: -4px;
+  right: -4px;
+}
+
 .editor-source,
 .editor-preview {
-  min-width: 0;
+  flex: 1;
   min-height: 0;
   overflow: auto;
 }
