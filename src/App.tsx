@@ -91,6 +91,10 @@ function App() {
   const [showAbout, setShowAbout] = useState(false);
   const [editorView, setEditorView] = useState<EditorView | null>(null);
 
+  const [viewMode, setViewMode] = useState<"both" | "editor" | "preview">("both");
+  const [editorWidth, setEditorWidth] = useState(50); // percentage
+  const [isResizing, setIsResizing] = useState(false);
+
   const [isEditingName, setIsEditingName] = useState(false);
   const [tempFileName, setTempFileName] = useState("");
   const [copied, setCopied] = useState(false);
@@ -110,6 +114,42 @@ function App() {
       console.error("Failed to copy:", err);
     }
   }, [source]);
+
+  const handleMouseMove = useCallback((e: MouseEvent) => {
+    if (!isResizing) return;
+    const container = document.querySelector(".editor-layout");
+    if (!container) return;
+    const rect = container.getBoundingClientRect();
+    const percentage = ((e.clientX - rect.left) / rect.width) * 100;
+    
+    if (percentage < 5) {
+      setViewMode("preview");
+      setIsResizing(false);
+    } else if (percentage > 95) {
+      setViewMode("editor");
+      setIsResizing(false);
+    } else {
+      setEditorWidth(percentage);
+    }
+  }, [isResizing]);
+
+  const handleMouseUp = useCallback(() => {
+    setIsResizing(false);
+  }, []);
+
+  useEffect(() => {
+    if (isResizing) {
+      window.addEventListener("mousemove", handleMouseMove);
+      window.addEventListener("mouseup", handleMouseUp);
+    } else {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    }
+    return () => {
+      window.removeEventListener("mousemove", handleMouseMove);
+      window.removeEventListener("mouseup", handleMouseUp);
+    };
+  }, [isResizing, handleMouseMove, handleMouseUp]);
 
   const handleRename = useCallback(async () => {
     setIsEditingName(false);
@@ -318,6 +358,12 @@ function App() {
       listen("menu-open-folder", () => void openWorkspace()),
       listen("menu-save", () => void saveFile()),
       listen("menu-save-as", () => void saveFileAs()),
+      listen("menu-toggle-editor", () => {
+        setViewMode((prev) => (prev === "preview" ? "both" : "preview"));
+      }),
+      listen("menu-toggle-preview", () => {
+        setViewMode((prev) => (prev === "editor" ? "both" : "editor"));
+      }),
       listen("menu-theme", (event) => {
         setTheme(event.payload as "light" | "dark" | "system");
       }),
@@ -442,6 +488,21 @@ function App() {
           )}
         </div>
         <div className="toolbar-actions">
+          <button 
+            className={`toolbar-btn ${viewMode === "preview" ? "active" : ""}`} 
+            onClick={() => setViewMode(viewMode === "preview" ? "both" : "preview")}
+            title={viewMode === "preview" ? "Show Editor" : "Hide Editor"}
+          >
+            {viewMode === "preview" ? "Show Editor" : "Hide Editor"}
+          </button>
+          <button 
+            className={`toolbar-btn ${viewMode === "editor" ? "active" : ""}`} 
+            onClick={() => setViewMode(viewMode === "editor" ? "both" : "editor")}
+            title={viewMode === "editor" ? "Show Preview" : "Hide Preview"}
+          >
+            {viewMode === "editor" ? "Show Preview" : "Hide Preview"}
+          </button>
+          <div className="toolbar-divider" style={{ width: '1px', height: '20px', background: 'var(--toolbar-border)', margin: '0 4px' }} />
           <button className="toolbar-btn" onClick={handleCopy} title="Copy Markdown">
             {copied ? "✓" : "Copy"}
           </button>
@@ -571,28 +632,51 @@ function App() {
           </aside>
         )}
         <main className="editor grow min-h-0">
-          <div className="editor-whole grid h-full grid-rows-2 md:grid-cols-2 md:grid-rows-1 border-gray-300 dark:border-gray-800 relative">
+          <div className="editor-layout relative">
             <FindOverlay
               isOpen={showFindOverlay}
               onClose={() => setShowFindOverlay(false)}
               editorView={editorView}
             />
-            <CodeMirror
-              className="editor-source min-h-0 overflow-auto"
-              value={source}
-              height="100%"
-              theme={isDark ? "dark" : "light"}
-              basicSetup={{ lineNumbers: true, foldGutter: false }}
-              extensions={[markdown({ codeLanguages: languages }), gutters({ fixed: false })]}
-              onChange={(value) => setSource(value)}
-              onCreateEditor={(view) => {
-                editorViewRef.current = view;
-                setEditorView(view);
-              }}
-            />
-            <div className="editor-preview min-h-0 overflow-auto border-t md:border-t-0 md:border-l border-gray-300 dark:border-gray-800">
-              <MilkdownEditor markdown={source} onChange={setSource} filePath={filePath} />
-            </div>
+            
+            {(viewMode === "both" || viewMode === "editor") && (
+              <div 
+                className="editor-pane" 
+                style={{ width: viewMode === "both" ? `${editorWidth}%` : "100%" }}
+              >
+                <CodeMirror
+                  className="editor-source h-full"
+                  value={source}
+                  height="100%"
+                  theme={isDark ? "dark" : "light"}
+                  basicSetup={{ lineNumbers: true, foldGutter: false }}
+                  extensions={[markdown({ codeLanguages: languages }), gutters({ fixed: false })]}
+                  onChange={(value) => setSource(value)}
+                  onCreateEditor={(view) => {
+                    editorViewRef.current = view;
+                    setEditorView(view);
+                  }}
+                />
+              </div>
+            )}
+
+            {viewMode === "both" && (
+              <div 
+                className={`editor-resizer ${isResizing ? "dragging" : ""}`}
+                onMouseDown={() => setIsResizing(true)}
+              />
+            )}
+
+            {(viewMode === "both" || viewMode === "preview") && (
+              <div 
+                className="editor-pane"
+                style={{ width: viewMode === "both" ? `${100 - editorWidth}%` : "100%" }}
+              >
+                <div className="editor-preview h-full border-gray-300 dark:border-gray-800">
+                  <MilkdownEditor markdown={source} onChange={setSource} filePath={filePath} />
+                </div>
+              </div>
+            )}
           </div>
         </main>
       </div>

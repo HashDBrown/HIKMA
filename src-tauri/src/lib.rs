@@ -344,6 +344,9 @@ pub fn run() {
                 &[
                     &PredefinedMenuItem::fullscreen(app, None)?,
                     &PredefinedMenuItem::separator(app)?,
+                    &MenuItem::with_id(app, "toggle-editor", "Toggle Editor", true, Some("CmdOrCtrl+J"))?,
+                    &MenuItem::with_id(app, "toggle-preview", "Toggle Preview", true, Some("CmdOrCtrl+P"))?,
+                    &PredefinedMenuItem::separator(app)?,
                     &MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))?,
                     &PredefinedMenuItem::separator(app)?,
                     &theme_menu,
@@ -417,6 +420,12 @@ pub fn run() {
                 }
                 "save_as" => {
                     let _ = app.emit("menu-save-as", ());
+                }
+                "toggle-editor" => {
+                    let _ = app.emit("menu-toggle-editor", ());
+                }
+                "toggle-preview" => {
+                    let _ = app.emit("menu-toggle-preview", ());
                 }
                 "reload" => {
                     let _ = app.get_webview_window("main").map(|w| w.reload());
