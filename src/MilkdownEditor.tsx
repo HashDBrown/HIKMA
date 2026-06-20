@@ -33,9 +33,10 @@ interface MilkdownEditorProps {
   markdown: string;
   onChange: (markdown: string) => void;
   filePath: string | null;
+  className?: string;
 }
 
-function Editor({ markdown, onChange, filePath }: MilkdownEditorProps) {
+function Editor({ markdown, onChange, filePath, className }: MilkdownEditorProps) {
   const focused = useRef(false);          // is the user editing in THIS pane?
   const lastSynced = useRef(markdown);
   const crepeRef = useRef<Crepe | null>(null);
@@ -76,7 +77,7 @@ function Editor({ markdown, onChange, filePath }: MilkdownEditorProps) {
 
   return (
     <div
-      className="milkdown-host"
+      className={className ?? "milkdown-host"}
       onFocusCapture={() => (focused.current = true)}
       onBlurCapture={() => (focused.current = false)}
     >
