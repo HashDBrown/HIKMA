@@ -650,7 +650,7 @@ function App() {
                   height="100%"
                   theme={isDark ? "dark" : "light"}
                   basicSetup={{ lineNumbers: true, foldGutter: false }}
-                  extensions={[markdown({ codeLanguages: languages }), gutters({ fixed: false })]}
+                  extensions={[markdown({ codeLanguages: languages }), gutters({ fixed: false }), EditorView.lineWrapping]}
                   onChange={(value) => setSource(value)}
                   onCreateEditor={(view) => {
                     editorViewRef.current = view;
@@ -672,8 +672,8 @@ function App() {
                 className="editor-pane"
                 style={{ width: viewMode === "both" ? `${100 - editorWidth}%` : "100%" }}
               >
-                <div className="editor-preview h-full border-gray-300 dark:border-gray-800">
-                  <MilkdownEditor markdown={source} onChange={setSource} filePath={filePath} />
+                <div className="editor-preview flex h-full flex-1 flex-col border-gray-300 dark:border-gray-800">
+                  <MilkdownEditor markdown={source} className="milkdown-host" onChange={setSource} filePath={filePath} />
                 </div>
               </div>
             )}
