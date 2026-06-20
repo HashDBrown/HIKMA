@@ -672,8 +672,8 @@ function App() {
                 className="editor-pane"
                 style={{ width: viewMode === "both" ? `${100 - editorWidth}%` : "100%" }}
               >
-                <div className="editor-preview h-full border-gray-300 dark:border-gray-800">
-                  <MilkdownEditor markdown={source} onChange={setSource} filePath={filePath} />
+                <div className="editor-preview flex h-full flex-1 flex-col border-gray-300 dark:border-gray-800">
+                  <MilkdownEditor markdown={source} className="milkdown-host" onChange={setSource} filePath={filePath} />
                 </div>
               </div>
             )}

@@ -535,7 +535,22 @@ body,
 
 .milkdown .ProseMirror {
   padding: 1em 2.7em 1.5em 5.5em !important;
+  height: 100%;
+}
 
+.milkdown-host,
+[data-milkdown-root] {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  /* min-height: 0;  lets it shrink instead of forcing overflow past .editor-pane's overflow:hidden */
+}
+
+.milkdown-host .milkdown {
+  flex: 1;
+  /* min-height: 0; */
+  overflow-y: scroll;
+  overscroll-behavior: auto;
 }
 
 /* Scrollbars — source pane (CM) + preview pane (Crepe) + sidebar tree */
