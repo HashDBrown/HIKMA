@@ -344,8 +344,20 @@ pub fn run() {
                 &[
                     &PredefinedMenuItem::fullscreen(app, None)?,
                     &PredefinedMenuItem::separator(app)?,
-                    &MenuItem::with_id(app, "toggle-editor", "Toggle Editor", true, Some("CmdOrCtrl+J"))?,
-                    &MenuItem::with_id(app, "toggle-preview", "Toggle Preview", true, Some("CmdOrCtrl+P"))?,
+                    &MenuItem::with_id(
+                        app,
+                        "toggle-editor",
+                        "Toggle Editor",
+                        true,
+                        Some("CmdOrCtrl+J"),
+                    )?,
+                    &MenuItem::with_id(
+                        app,
+                        "toggle-preview",
+                        "Toggle Preview",
+                        true,
+                        Some("CmdOrCtrl+P"),
+                    )?,
                     &PredefinedMenuItem::separator(app)?,
                     &MenuItem::with_id(app, "reload", "Reload", true, Some("CmdOrCtrl+R"))?,
                     &PredefinedMenuItem::separator(app)?,
