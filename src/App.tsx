@@ -312,6 +312,36 @@ function App() {
     }
   }, [saveFileAs]);
 
+  const exportToPdf = useCallback(async () => {
+    if (!isTauri) {
+      window.alert("PDF export needs the desktop app — run `npm run tauri dev`.");
+      return;
+    }
+
+    const stem = filePath
+      ? baseName(filePath).replace(/\.(md|markdown|txt)$/i, "")
+      : tempFileName || "Untitled";
+
+    let outputPath: string;
+
+    if (workspace) {
+      outputPath = `${workspace.path}/${stem}.pdf`;
+    } else {
+      const target = await saveDialog({
+        defaultPath: `${stem}.pdf`,
+        filters: [{ name: "PDF", extensions: ["pdf"] }],
+      });
+      if (!target) return;
+      outputPath = target;
+    }
+
+    try {
+      await invoke("export_to_pdf", { markdown: source, outputPath });
+    } catch (err) {
+      await message(`Could not export PDF:\n${err}`, { title: "Export failed", kind: "error" });
+    }
+  }, [source, filePath, tempFileName, workspace]);
+
   const insertText = useCallback((type: string) => {
     if (!editorViewRef.current) return;
 
@@ -505,6 +535,9 @@ function App() {
           <div className="toolbar-divider" style={{ width: '1px', height: '20px', background: 'var(--toolbar-border)', margin: '0 4px' }} />
           <button className="toolbar-btn" onClick={handleCopy} title="Copy Markdown">
             {copied ? "✓" : "Copy"}
+          </button>
+          <button className="toolbar-btn" onClick={() => void exportToPdf()} title="Export as PDF">
+            Export PDF
           </button>
           <div className="toolbar-menu" onClick={(e) => e.stopPropagation()}>
             <button
