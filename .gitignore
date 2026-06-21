@@ -31,5 +31,8 @@ src-tauri/target/
 *.sln
 *.sw?
 
+# Bundled sidecar binaries (downloaded by CI, not committed)
+src-tauri/binaries/
+
 # OS / editor junk
 .DS_Store

@@ -1,10 +1,13 @@
 // Learn more about Tauri commands at https://tauri.app/develop/calling-rust/
+use pulldown_cmark::{CodeBlockKind, Event, HeadingLevel, Options, Parser, Tag, TagEnd};
 use serde::Serialize;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
 use tauri::menu::{Menu, MenuItem, PredefinedMenuItem, Submenu};
 use tauri::{Emitter, Manager};
+use tauri_plugin_opener::OpenerExt;
+use tauri_plugin_shell::ShellExt;
 
 #[tauri::command]
 fn greet(name: &str) -> String {
@@ -130,6 +133,327 @@ fn rename_file(old_path: String, new_path: String) -> Result<(), String> {
     fs::rename(old_path, new_path).map_err(|e| e.to_string())
 }
 
+const PREAMBLE: &str = r##"
+#set page(margin: 2.4cm)
+#set text(fill: rgb("#1a1a1a"), size: 11pt, font: ("Liberation Sans", "Noto Sans Arabic"))
+#set par(justify: true, leading: 0.72em)
+
+#show heading.where(level: 1): set text(font: ("Liberation Serif", "Noto Naskh Arabic"), size: 25pt, weight: "regular")
+#show link: set text(fill: rgb("#2563eb"))
+
+#show quote.where(block: true): it => block(
+  fill: rgb("#f5f5f5"),
+  stroke: (left: 3pt + rgb("#9ca3af")),
+  inset: (left: 1em, rest: 0.7em),
+  width: 100%, radius: 2pt,
+  it.body,
+)
+
+#show raw.where(block: false): it => box(
+  fill: rgb("#f3f4f6"), inset: (x: 3pt), outset: (y: 3pt), radius: 3pt,
+  text(fill: rgb("#111827"), it),
+)
+
+#show raw.where(block: true): it => block(
+  width: 100%, fill: rgb("#f8f9fa"), inset: 10pt, radius: 6pt, breakable: true,
+)[
+  #set text(size: 9pt, font: "Liberation Mono")
+  #grid(
+    columns: (auto, 1fr), column-gutter: 12pt, row-gutter: 0.35em,
+    ..it.lines.map(line => (
+      align(right, text(fill: rgb("#9ca3af"))[#line.number]),
+      line.body,
+    )).flatten()
+  )
+]
+
+#set table(stroke: 0.5pt + rgb("#d1d5db"), inset: 8pt)
+#show table.cell.where(y: 0): set text(weight: "bold")
+
+"##;
+
+fn markdown_to_typst(markdown: &str) -> String {
+    let mut c = Converter::new();
+    let parser = Parser::new_ext(markdown, Options::all());
+    for event in parser {
+        c.handle(event);
+    }
+    c.finish()
+}
+
+struct Converter {
+    out: String,
+    list_stack: Vec<bool>,
+    in_code_block: bool,
+    in_link: bool,
+    link_url: String,
+    link_buf: String,
+    table_cols: usize,
+    in_head: bool,
+    in_cell: bool,
+    cell_buf: String,
+    header_cells: Vec<String>,
+    body_cells: Vec<String>,
+    in_table: bool,
+}
+
+impl Converter {
+    fn new() -> Self {
+        let mut out = String::from(PREAMBLE);
+        out.push('\n');
+        Self {
+            out,
+            list_stack: Vec::new(),
+            in_code_block: false,
+            in_link: false,
+            link_url: String::new(),
+            link_buf: String::new(),
+            table_cols: 0,
+            in_head: false,
+            in_cell: false,
+            cell_buf: String::new(),
+            header_cells: Vec::new(),
+            body_cells: Vec::new(),
+            in_table: false,
+        }
+    }
+
+    fn finish(self) -> String {
+        self.out
+    }
+
+    fn push_inline(&mut self, s: &str) {
+        if self.in_link {
+            self.link_buf.push_str(s);
+        } else if self.in_cell {
+            self.cell_buf.push_str(s);
+        } else {
+            self.out.push_str(s);
+        }
+    }
+
+    fn handle(&mut self, event: Event) {
+        match event {
+            Event::Start(Tag::Heading { level, .. }) => {
+                let depth = match level {
+                    HeadingLevel::H1 => 1,
+                    HeadingLevel::H2 => 2,
+                    HeadingLevel::H3 => 3,
+                    HeadingLevel::H4 => 4,
+                    HeadingLevel::H5 => 5,
+                    HeadingLevel::H6 => 6,
+                };
+                self.out.push_str(&"=".repeat(depth));
+                self.out.push(' ');
+            }
+            Event::End(TagEnd::Heading(_)) => self.out.push_str("\n\n"),
+
+            Event::Start(Tag::Paragraph) => {}
+            Event::End(TagEnd::Paragraph) => {
+                if !self.in_cell {
+                    self.out.push_str("\n\n");
+                }
+            }
+
+            Event::Start(Tag::Strong) => self.push_inline("#strong["),
+            Event::End(TagEnd::Strong) => self.push_inline("]"),
+            Event::Start(Tag::Emphasis) => self.push_inline("#emph["),
+            Event::End(TagEnd::Emphasis) => self.push_inline("]"),
+            Event::Start(Tag::Strikethrough) => self.push_inline("#strike["),
+            Event::End(TagEnd::Strikethrough) => self.push_inline("]"),
+
+            Event::Start(Tag::BlockQuote(_)) => self.out.push_str("#quote(block: true)[\n"),
+            Event::End(TagEnd::BlockQuote(_)) => self.out.push_str("]\n\n"),
+
+            Event::Start(Tag::CodeBlock(kind)) => {
+                self.in_code_block = true;
+                let lang = match kind {
+                    CodeBlockKind::Fenced(l) => l.to_string(),
+                    CodeBlockKind::Indented => String::new(),
+                };
+                self.out.push_str("```");
+                self.out.push_str(&lang);
+                self.out.push('\n');
+            }
+            Event::End(TagEnd::CodeBlock) => {
+                self.in_code_block = false;
+                self.out.push_str("```\n\n");
+            }
+
+            Event::Start(Tag::List(first)) => {
+                self.list_stack.push(first.is_some());
+            }
+            Event::End(TagEnd::List(_)) => {
+                self.list_stack.pop();
+                if self.list_stack.is_empty() {
+                    self.out.push('\n');
+                }
+            }
+            Event::Start(Tag::Item) => {
+                let indent = "  ".repeat(self.list_stack.len().saturating_sub(1));
+                self.out.push_str(&indent);
+                let ordered = *self.list_stack.last().unwrap_or(&false);
+                self.out.push_str(if ordered { "+ " } else { "- " });
+            }
+            Event::End(TagEnd::Item) => self.out.push('\n'),
+            Event::TaskListMarker(checked) => {
+                self.out.push_str(if checked {
+                    "#box[#sym.ballot.x] "
+                } else {
+                    "#box[#sym.ballot] "
+                });
+            }
+
+            Event::Start(Tag::Link { dest_url, .. }) => {
+                self.in_link = true;
+                self.link_url = dest_url.to_string();
+                self.link_buf.clear();
+            }
+            Event::End(TagEnd::Link) => {
+                self.in_link = false;
+                let s = format!("#link(\"{}\")[{}]", self.link_url, self.link_buf);
+                self.push_inline(&s);
+                self.link_url.clear();
+                self.link_buf.clear();
+            }
+
+            Event::Start(Tag::Image { dest_url, .. }) => {
+                self.push_inline(&format!("#image(\"{}\")", dest_url));
+            }
+            Event::End(TagEnd::Image) => {}
+
+            Event::Start(Tag::Table(aligns)) => {
+                self.in_table = true;
+                self.table_cols = aligns.len();
+                self.header_cells.clear();
+                self.body_cells.clear();
+            }
+            Event::End(TagEnd::Table) => {
+                self.emit_table();
+                self.in_table = false;
+            }
+            Event::Start(Tag::TableHead) => self.in_head = true,
+            Event::End(TagEnd::TableHead) => self.in_head = false,
+            Event::Start(Tag::TableRow) => {}
+            Event::End(TagEnd::TableRow) => {}
+            Event::Start(Tag::TableCell) => {
+                self.in_cell = true;
+                self.cell_buf.clear();
+            }
+            Event::End(TagEnd::TableCell) => {
+                self.in_cell = false;
+                let cell = self.cell_buf.trim().to_string();
+                if self.in_head {
+                    self.header_cells.push(cell);
+                } else {
+                    self.body_cells.push(cell);
+                }
+            }
+
+            Event::Code(text) => {
+                self.push_inline("`");
+                self.push_inline(&text);
+                self.push_inline("`");
+            }
+            Event::Text(text) => {
+                if self.in_code_block {
+                    self.out.push_str(&text);
+                } else {
+                    let escaped = escape_typst(&text);
+                    self.push_inline(&escaped);
+                }
+            }
+            Event::SoftBreak => {
+                if self.in_code_block {
+                    self.out.push('\n');
+                } else {
+                    self.push_inline(" ");
+                }
+            }
+            Event::HardBreak => self.push_inline(" \\ \n"),
+            Event::Rule => self
+                .out
+                .push_str("#line(length: 100%, stroke: 0.5pt + rgb(\"#d1d5db\"))\n\n"),
+            _ => {}
+        }
+    }
+
+    fn emit_table(&mut self) {
+        if self.table_cols == 0 {
+            return;
+        }
+        self.out
+            .push_str(&format!("#table(\n  columns: {},\n", self.table_cols));
+        if !self.header_cells.is_empty() {
+            self.out.push_str("  table.header(\n");
+            for c in &self.header_cells {
+                self.out.push_str(&format!("    [{}],\n", c));
+            }
+            self.out.push_str("  ),\n");
+        }
+        for c in &self.body_cells {
+            self.out.push_str(&format!("  [{}],\n", c));
+        }
+        self.out.push_str(")\n\n");
+    }
+}
+
+fn escape_typst(text: &str) -> String {
+    let mut s = String::with_capacity(text.len());
+    for ch in text.chars() {
+        match ch {
+            '\\' | '#' | '$' | '*' | '_' | '`' | '<' | '@' | '[' | ']' | '~' => {
+                s.push('\\');
+                s.push(ch);
+            }
+            _ => s.push(ch),
+        }
+    }
+    s
+}
+
+#[tauri::command]
+async fn export_to_pdf(
+    app: tauri::AppHandle,
+    markdown: String,
+    output_path: String,
+    source_path: Option<String>,
+) -> Result<(), String> {
+    let typst_markup = markdown_to_typst(&markdown);
+
+    // Write the .typ file next to the source document so that Typst resolves
+    // #image() and other relative paths against the correct directory.
+    let tmp_dir = source_path
+        .as_deref()
+        .and_then(|p| Path::new(p).parent())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(std::env::temp_dir);
+    let tmp_input = tmp_dir.join("hikma_export.typ");
+    fs::write(&tmp_input, &typst_markup).map_err(|e| e.to_string())?;
+
+    let result = app
+        .shell()
+        .sidecar("typst")
+        .map_err(|e| e.to_string())?
+        .args(["compile", tmp_input.to_str().unwrap(), &output_path])
+        .output()
+        .await
+        .map_err(|e| e.to_string())?;
+
+    let _ = fs::remove_file(&tmp_input);
+
+    if !result.status.success() {
+        let stderr = String::from_utf8_lossy(&result.stderr);
+        return Err(format!("typst failed:\n{stderr}"));
+    }
+
+    app.opener()
+        .open_path(&output_path, None::<&str>)
+        .map_err(|e| e.to_string())?;
+
+    Ok(())
+}
+
 fn search_recursive(path: &Path, query: &str, matches: &mut Vec<ContentMatch>) {
     if let Ok(entries) = fs::read_dir(path) {
         for entry in entries.flatten() {
@@ -208,6 +532,7 @@ pub fn run() {
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_fs::init())
+        .plugin(tauri_plugin_shell::init())
         .setup(|app| {
             let app_menu = Submenu::with_id_and_items(
                 app,
@@ -500,7 +825,8 @@ pub fn run() {
             read_dir_tree,
             search_content,
             rename_file,
-            allow_asset_dir
+            allow_asset_dir,
+            export_to_pdf
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");

@@ -26,7 +26,7 @@ function baseName(path: string) {
 function cleanMarkdown(md: string): string {
   let text = md.replace(/<[^>]*>/g, "");
   text = text.replace(/^#+\s+/gm, "");
-  text = text.replace(/[\*_]{1,3}([^*_]+)[\*_]{1,3}/g, "$1");
+  text = text.replace(/[*_]{1,3}([^*_]+)[*_]{1,3}/g, "$1");
   text = text.replace(/\[([^\]]+)\]\([^)]+\)/g, "$1");
   text = text.replace(/`([^`]+)`/g, "$1");
   text = text.replace(/^\s*[-*+]\s+/gm, "");
