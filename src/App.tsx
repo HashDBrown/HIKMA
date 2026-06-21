@@ -336,7 +336,7 @@ function App() {
     }
 
     try {
-      await invoke("export_to_pdf", { markdown: source, outputPath });
+      await invoke("export_to_pdf", { markdown: source, outputPath, sourcePath: filePath ?? null });
     } catch (err) {
       await message(`Could not export PDF:\n${err}`, { title: "Export failed", kind: "error" });
     }

@@ -255,10 +255,10 @@ impl Converter {
                 }
             }
 
-            Event::Start(Tag::Strong) => self.push_inline("*"),
-            Event::End(TagEnd::Strong) => self.push_inline("*"),
-            Event::Start(Tag::Emphasis) => self.push_inline("_"),
-            Event::End(TagEnd::Emphasis) => self.push_inline("_"),
+            Event::Start(Tag::Strong) => self.push_inline("#strong["),
+            Event::End(TagEnd::Strong) => self.push_inline("]"),
+            Event::Start(Tag::Emphasis) => self.push_inline("#emph["),
+            Event::End(TagEnd::Emphasis) => self.push_inline("]"),
             Event::Start(Tag::Strikethrough) => self.push_inline("#strike["),
             Event::End(TagEnd::Strikethrough) => self.push_inline("]"),
 
@@ -417,10 +417,18 @@ async fn export_to_pdf(
     app: tauri::AppHandle,
     markdown: String,
     output_path: String,
+    source_path: Option<String>,
 ) -> Result<(), String> {
     let typst_markup = markdown_to_typst(&markdown);
 
-    let tmp_input = std::env::temp_dir().join("hikma_export.typ");
+    // Write the .typ file next to the source document so that Typst resolves
+    // #image() and other relative paths against the correct directory.
+    let tmp_dir = source_path
+        .as_deref()
+        .and_then(|p| Path::new(p).parent())
+        .map(|p| p.to_path_buf())
+        .unwrap_or_else(std::env::temp_dir);
+    let tmp_input = tmp_dir.join("hikma_export.typ");
     fs::write(&tmp_input, &typst_markup).map_err(|e| e.to_string())?;
 
     let result = app
