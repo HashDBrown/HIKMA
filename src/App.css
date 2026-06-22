@@ -261,6 +261,9 @@ body,
 }
 
 .toolbar-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
   font: inherit;
   font-size: 0.7rem;
   letter-spacing: 0.04em;
@@ -270,11 +273,23 @@ body,
   border-radius: 4px;
   padding: 2px 8px;
   cursor: pointer;
+  transition: background 0.12s ease, color 0.12s ease;
+}
+
+/* Icon-only buttons: square them off so they don't inherit text padding */
+.toolbar-btn--icon {
+  justify-content: center;
+  gap: 0;
+  padding: 4px;
 }
 
 .toolbar-btn:hover:not(:disabled) {
   background: var(--toolbar-btn-hover-bg);
   color: var(--toolbar-btn-hover-fg);
+}
+
+.toolbar-btn:active:not(:disabled) {
+  transform: translateY(0.5px);
 }
 
 .toolbar-btn:disabled {
