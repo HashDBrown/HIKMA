@@ -23,7 +23,7 @@ jobs:
     # accidentally raise the minimum glibc your binaries require.
     runs-on: ubuntu-22.04
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       # Tauri v2 needs these system libs to compile on Linux.
       - name: Install Tauri system dependencies
@@ -57,7 +57,7 @@ jobs:
     name: Frontend lint & audit
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: actions/setup-node@v4
         with:
           node-version: lts/*
@@ -72,7 +72,7 @@ jobs:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0   # gitleaks needs full history to scan all commits
       - uses: gitleaks/gitleaks-action@v2
@@ -83,7 +83,7 @@ jobs:
     name: Dependency policy (cargo-deny)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - uses: EmbarkStudios/cargo-deny-action@v2
         with:
           manifest-path: src-tauri/Cargo.toml
@@ -92,7 +92,7 @@ jobs:
     name: SAST (semgrep)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - run: pipx install semgrep
       # `--config auto` pulls community rulesets for Rust + JS/TS;
       # `--error` makes a finding fail the job.
