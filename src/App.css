@@ -1315,9 +1315,12 @@ body,
 
 /* ── Help Dialog ── */
 
+/* ── Help Dialog ── */
+
 .help-dialog {
   width: 100%;
-  max-width: 520px;
+  max-width: 760px;            /* wider so two columns aren't cramped */
+  max-height: 85vh;
   background: var(--toolbar-menu-bg);
   border: 1px solid var(--toolbar-border);
   border-radius: 12px;
@@ -1326,6 +1329,32 @@ body,
   color: var(--app-fg);
   display: flex;
   flex-direction: column;
+  min-height: 0;
+}
+
+.help-dialog-content {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 16px 28px;              /* row gap / column gap */
+  align-content: start;        /* don't stretch rows to fill the tall dialog */
+  align-items: start;          /* sections top-aligned within their cell */
+  overflow-y: auto;
+  min-height: 0;
+  flex: 1;
+  padding-right: 4px;
+  margin-right: -4px;
+}
+
+/* Collapse back to one column on narrow windows */
+@media (max-width: 600px) {
+  .help-dialog-content {
+    grid-template-columns: 1fr;
+  }
+}
+
+:has(> .help-dialog) {
+  align-items: flex-start;   /* stop centering on the vertical axis */
+  padding-top: 4vh;          /* distance from the top — lower this to go higher */
 }
 
 .help-dialog-header {
@@ -1335,6 +1364,7 @@ body,
   border-bottom: 1px solid var(--toolbar-border);
   padding-bottom: 10px;
   margin-bottom: 15px;
+  flex-shrink: 0;
 }
 
 .help-dialog-title {
@@ -1357,12 +1387,6 @@ body,
 .help-dialog-close:hover {
   color: var(--app-fg);
   background: var(--toolbar-btn-hover-bg);
-}
-
-.help-dialog-content {
-  display: flex;
-  flex-direction: column;
-  gap: 15px;
 }
 
 .help-section {

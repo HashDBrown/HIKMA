@@ -577,7 +577,7 @@ pub fn run() {
                         Some("CmdOrCtrl+Shift+S"),
                     )?,
                     &PredefinedMenuItem::separator(app)?,
-                    &PredefinedMenuItem::close_window(app, None)?,
+                    &MenuItem::with_id(app, "close_tab", "Close Tab", true, Some("CmdOrCtrl+W"))?,
                 ],
             )?;
 
@@ -757,6 +757,9 @@ pub fn run() {
                 }
                 "save_as" => {
                     let _ = app.emit("menu-save-as", ());
+                }
+                "close_tab" => {
+                    let _ = app.emit("menu-close-tab", ());
                 }
                 "toggle-editor" => {
                     let _ = app.emit("menu-toggle-editor", ());

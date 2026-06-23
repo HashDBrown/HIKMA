@@ -211,6 +211,11 @@ function App() {
   const nameBeforeEditRef = useRef("");
 
   const editorViewRef = useRef<EditorView | null>(null);
+  const activeTabRef = useRef<HTMLDivElement | null>(null);
+  // Per-tab CodeMirror viewport + cursor, kept across the keyed remount on switch.
+  const editorStatesRef = useRef<Map<string, { scrollTop: number; anchor: number; head: number }>>(
+    new Map(),
+  );
 
   const handleCopy = useCallback(async () => {
     try {
@@ -394,6 +399,7 @@ function App() {
       if (!discard) return;
     }
 
+    editorStatesRef.current.delete(id);
     const idx = list.findIndex((d) => d.id === id);
     const next = list.filter((d) => d.id !== id);
 
@@ -590,13 +596,15 @@ function App() {
   }, []);
 
   // Persist open file-backed tabs (untitled buffers are not restorable).
+  // Only the set of paths + active path matter, so skip the per-keystroke write.
+  const lastPersistedRef = useRef("");
   useEffect(() => {
     if (!hydratedRef.current) return;
     const openPaths = docs.filter((d) => d.filePath).map((d) => d.filePath as string);
-    localStorage.setItem(
-      TABS_KEY,
-      JSON.stringify({ openPaths, activePath: activeDoc.filePath ?? null }),
-    );
+    const serialized = JSON.stringify({ openPaths, activePath: activeDoc.filePath ?? null });
+    if (serialized === lastPersistedRef.current) return;
+    lastPersistedRef.current = serialized;
+    localStorage.setItem(TABS_KEY, serialized);
   }, [docs, activeId, activeDoc.filePath]);
 
   useEffect(() => {
@@ -608,6 +616,7 @@ function App() {
       listen("menu-open-folder", () => void openWorkspace()),
       listen("menu-save", () => void saveFile()),
       listen("menu-save-as", () => void saveFileAs()),
+      listen("menu-close-tab", () => void closeTab(activeIdRef.current)),
       listen("menu-toggle-editor", () => {
         setViewMode((prev) => (prev === "preview" ? "both" : "preview"));
       }),
@@ -635,11 +644,20 @@ function App() {
     return () => {
       void Promise.all(unlistens).then((fns) => fns.forEach((fn) => fn()));
     };
-  }, [insertText, newFile, openFile, openWorkspace, saveFile, saveFileAs]);
+  }, [insertText, newFile, openFile, openWorkspace, saveFile, saveFileAs, closeTab]);
 
+  // Shortcuts that are NOT native-menu accelerators live here. File ops
+  // (⌘N/O/S, ⌘W, etc.) are owned by the native menu so they don't double-fire.
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
       if (!(e.metaKey || e.ctrlKey)) return;
+
+      // Don't hijack these while typing in a form field (rename, find, tag inputs).
+      // The CodeMirror/Milkdown editors are contenteditable, not inputs, so shortcuts
+      // like ⌘1–9 still work while editing a note.
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA") return;
+
       const key = e.key.toLowerCase();
 
       // Tab cycling: Ctrl+Tab / Ctrl+Shift+Tab
@@ -650,24 +668,12 @@ function App() {
       }
       if (e.altKey) return;
 
-      if (key === "o") {
-        e.preventDefault();
-        void (e.shiftKey ? openWorkspace() : openFile());
-      } else if (key === "s") {
-        e.preventDefault();
-        void (e.shiftKey ? saveFileAs() : saveFile());
-      } else if (key === "k") {
+      if (key === "k") {
         e.preventDefault();
         setShowCommandPalette(true);
       } else if (key === "f") {
         e.preventDefault();
         setShowFindOverlay(true);
-      } else if (key === "n") {
-        e.preventDefault();
-        newFile();
-      } else if (key === "w") {
-        e.preventDefault();
-        void closeTab(activeIdRef.current);
       } else if (/^[1-9]$/.test(key)) {
         e.preventDefault();
         const target = docsRef.current[parseInt(key, 10) - 1];
@@ -676,7 +682,7 @@ function App() {
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [newFile, openFile, openWorkspace, saveFile, saveFileAs, closeTab, cycleTab]);
+  }, [cycleTab]);
 
   useEffect(() => {
     const handleGlobalEsc = (e: KeyboardEvent) => {
@@ -689,6 +695,11 @@ function App() {
     window.addEventListener("keydown", handleGlobalEsc);
     return () => window.removeEventListener("keydown", handleGlobalEsc);
   }, []);
+
+  // Keep the active tab visible when switching via keyboard/cycle into the overflow strip.
+  useEffect(() => {
+    activeTabRef.current?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [activeId]);
 
   useEffect(() => {
     if (!isTauri) return;
@@ -986,6 +997,7 @@ function App() {
               return (
                 <div
                   key={doc.id}
+                  ref={isActive ? activeTabRef : undefined}
                   role="tab"
                   aria-selected={isActive}
                   className={`tab ${isActive ? "active" : ""}`}
@@ -1040,9 +1052,49 @@ function App() {
                   basicSetup={{ lineNumbers: true, foldGutter: false }}
                   extensions={[markdown({ codeLanguages: languages }), gutters({ fixed: false }), EditorView.lineWrapping]}
                   onChange={(value) => setSource(value)}
+                  onUpdate={(vu) => {
+                    if (!vu.selectionSet) return;
+                    const sel = vu.state.selection.main;
+                    const prev = editorStatesRef.current.get(activeIdRef.current);
+                    editorStatesRef.current.set(activeIdRef.current, {
+                      scrollTop: prev?.scrollTop ?? 0,
+                      anchor: sel.anchor,
+                      head: sel.head,
+                    });
+                  }}
                   onCreateEditor={(view) => {
                     editorViewRef.current = view;
                     setEditorView(view);
+
+                    // Restore this tab's saved cursor + scroll position.
+                    const saved = editorStatesRef.current.get(activeIdRef.current);
+                    if (saved) {
+                      const len = view.state.doc.length;
+                      view.dispatch({
+                        selection: {
+                          anchor: Math.min(saved.anchor, len),
+                          head: Math.min(saved.head, len),
+                        },
+                      });
+                      // Scroll after layout, otherwise scrollTop won't stick.
+                      requestAnimationFrame(() => {
+                        view.scrollDOM.scrollTop = saved.scrollTop;
+                      });
+                    }
+
+                    // Keep the saved scroll position current as the user scrolls.
+                    view.scrollDOM.addEventListener(
+                      "scroll",
+                      () => {
+                        const prev = editorStatesRef.current.get(activeIdRef.current);
+                        editorStatesRef.current.set(activeIdRef.current, {
+                          anchor: prev?.anchor ?? 0,
+                          head: prev?.head ?? 0,
+                          scrollTop: view.scrollDOM.scrollTop,
+                        });
+                      },
+                      { passive: true },
+                    );
                   }}
                 />
               </div>
