@@ -8,7 +8,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { listen } from "@tauri-apps/api/event";
 import { gutters } from "@codemirror/view";
-import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Search, Folder, Info, Settings, ClipboardCopy, Check } from "lucide-react";
+import { PanelLeftClose, PanelLeftOpen, PanelRightClose, PanelRightOpen, Search, Folder, Info, Settings, ClipboardCopy, Check, X, Plus } from "lucide-react";
 import { MilkdownEditor } from "./MilkdownEditor";
 import { FileTree, type FileNode } from "./FileTree";
 import { CommandPalette, FindOverlay } from "./SearchOverlays";
@@ -44,9 +44,32 @@ const prefersDark = window.matchMedia("(prefers-color-scheme: dark)");
 const isTauri = "__TAURI_INTERNALS__" in window;
 
 const RECENT_KEY = "hikma.recent-files";
+const TABS_KEY = "hikma.open-tabs";
 const MAX_RECENT = 10;
 
 const markdownFilters = [{ name: "Markdown", extensions: ["md", "markdown", "txt"] }];
+
+/** A single open document. Multiple of these are shown as tabs. */
+type OpenDoc = {
+  id: string; // stable id — survives rename, used as the React key for the tab + editor
+  filePath: string | null; // null = untitled, not yet saved to disk
+  source: string;
+  savedSource: string; // last persisted content, for per-tab dirty tracking
+  tempName: string; // suggested/edited name for untitled docs (and the rename buffer)
+};
+
+let docCounter = 0;
+function makeDoc(partial: Partial<OpenDoc> = {}): OpenDoc {
+  docCounter += 1;
+  return {
+    id: `doc-${Date.now()}-${docCounter}`,
+    filePath: null,
+    source: "",
+    savedSource: "",
+    tempName: "",
+    ...partial,
+  };
+}
 
 function loadRecentFiles(): string[] {
   try {
@@ -71,15 +94,22 @@ function dirName(path: string) {
   return idx === -1 ? path : path.slice(0, idx);
 }
 
+function docName(doc: OpenDoc) {
+  return doc.filePath ? baseName(doc.filePath) : doc.tempName || "Untitled";
+}
+
 //grants the asset protocol read access to `dir` so the preview can load local images via `convertFileSrc`
 function allowAssetDir(dir: string) {
   void invoke("allow_asset_dir", { path: dir }).catch(() => {});
 }
 
 function App() {
-  const [source, setSource] = useState(initialSource);
-  const [savedSource, setSavedSource] = useState(initialSource);
-  const [filePath, setFilePath] = useState<string | null>(null);
+  // Both initializers are lazy, so the welcome doc is created exactly once on mount.
+  const [docs, setDocs] = useState<OpenDoc[]>(() => [
+    makeDoc({ source: initialSource, savedSource: initialSource }),
+  ]);
+  const [activeId, setActiveId] = useState<string>(() => docs[0].id);
+
   const [workspace, setWorkspace] = useState<FileNode | null>(null);
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [recentFiles, setRecentFiles] = useState<string[]>(loadRecentFiles);
@@ -87,6 +117,38 @@ function App() {
   const [theme, setTheme] = useState<"light" | "dark" | "system">("system");
   const [systemDark, setSystemDark] = useState(prefersDark.matches);
   const isDark = theme === "system" ? systemDark : theme === "dark";
+
+  // Always-current mirrors so the once-registered window/keyboard listeners and
+  // async file ops read the latest tab state without re-subscribing.
+  const docsRef = useRef(docs);
+  const activeIdRef = useRef(activeId);
+  useEffect(() => {
+    docsRef.current = docs;
+    activeIdRef.current = activeId;
+  });
+
+  const patchDoc = useCallback((id: string, patch: Partial<OpenDoc>) => {
+    setDocs((prev) => prev.map((d) => (d.id === id ? { ...d, ...patch } : d)));
+  }, []);
+
+  const patchActiveDoc = useCallback(
+    (patch: Partial<OpenDoc>) => patchDoc(activeIdRef.current, patch),
+    [patchDoc],
+  );
+
+  // Compatibility setters so the rest of the component reads/writes the active doc
+  // as if it were flat state.
+  const setSource = useCallback((v: string) => patchActiveDoc({ source: v }), [patchActiveDoc]);
+  const setFilePath = useCallback((v: string | null) => patchActiveDoc({ filePath: v }), [patchActiveDoc]);
+  const setTempFileName = useCallback((v: string) => patchActiveDoc({ tempName: v }), [patchActiveDoc]);
+
+  const activeDoc = docs.find((d) => d.id === activeId) ?? docs[0];
+  const source = activeDoc.source;
+  const savedSource = activeDoc.savedSource;
+  const filePath = activeDoc.filePath;
+  const tempFileName = activeDoc.tempName;
+  const dirty = source !== savedSource;
+  const fileName = docName(activeDoc);
 
   const [starredPaths, setStarredPaths] = useState<string[]>(() => {
     try {
@@ -133,7 +195,7 @@ function App() {
       return next;
     });
   }, []);
-  
+
   const [showCommandPalette, setShowCommandPalette] = useState(false);
   const [showFindOverlay, setShowFindOverlay] = useState(false);
   const [showAbout, setShowAbout] = useState(false);
@@ -145,14 +207,10 @@ function App() {
   const [isResizing, setIsResizing] = useState(false);
 
   const [isEditingName, setIsEditingName] = useState(false);
-  const [tempFileName, setTempFileName] = useState("");
   const [copied, setCopied] = useState(false);
   const nameBeforeEditRef = useRef("");
 
   const editorViewRef = useRef<EditorView | null>(null);
-
-  const dirty = source !== savedSource;
-  const fileName = filePath ? baseName(filePath) : (tempFileName || "Untitled");
 
   const handleCopy = useCallback(async () => {
     try {
@@ -170,7 +228,7 @@ function App() {
     if (!container) return;
     const rect = container.getBoundingClientRect();
     const percentage = ((e.clientX - rect.left) / rect.width) * 100;
-    
+
     if (percentage < 5) {
       setViewMode("preview");
       setIsResizing(false);
@@ -234,7 +292,7 @@ function App() {
       await message(`Could not rename file:\n${err}`, { title: "Rename failed", kind: "error" });
       setTempFileName(baseName(filePath));
     }
-  }, [tempFileName, fileName, filePath]);
+  }, [tempFileName, fileName, filePath, setFilePath, setTempFileName]);
 
   const startEditing = useCallback(() => {
     // Remember the current name so Escape can restore it cleanly
@@ -242,18 +300,12 @@ function App() {
     // Show the full name including its extension so the user can edit it directly
     setTempFileName(withMarkdownExt(fileName));
     setIsEditingName(true);
-  }, [fileName, filePath, tempFileName]);
+  }, [fileName, filePath, tempFileName, setTempFileName]);
 
   const cancelEditing = useCallback(() => {
     setIsEditingName(false);
     setTempFileName(nameBeforeEditRef.current);
-  }, []);
-
-  // Latest state for the stable window/keyboard listeners registered once below
-  const stateRef = useRef({ source, filePath, dirty });
-  useEffect(() => {
-    stateRef.current = { source, filePath, dirty };
-  });
+  }, [setTempFileName]);
 
   useEffect(() => {
     const onChange = (e: MediaQueryListEvent) => setSystemDark(e.matches);
@@ -286,15 +338,7 @@ function App() {
     [updateRecentFiles],
   );
 
-  const confirmDiscard = useCallback(async () => {
-    if (!stateRef.current.dirty) return true;
-    return ask("You have unsaved changes that will be lost.", {
-      title: "Discard changes?",
-      kind: "warning",
-      okLabel: "Discard",
-      cancelLabel: "Cancel",
-    });
-  }, []);
+  // --- Tab management ---------------------------------------------------------
 
   const openFile = useCallback(
     async (path?: string) => {
@@ -303,15 +347,22 @@ function App() {
         return;
       }
       setFileMenuOpen(false);
-      if (!(await confirmDiscard())) return;
       const target =
         path ?? (await openDialog({ multiple: false, directory: false, filters: markdownFilters }));
-      if (!target) return;
+      if (!target || typeof target !== "string") return;
+
+      // Already open? Just focus that tab.
+      const existing = docsRef.current.find((d) => d.filePath === target);
+      if (existing) {
+        setActiveId(existing.id);
+        return;
+      }
+
       try {
         const text = await readTextFile(target);
-        setSource(text);
-        setSavedSource(text);
-        setFilePath(target);
+        const doc = makeDoc({ filePath: target, source: text, savedSource: text });
+        setDocs((prev) => [...prev, doc]);
+        setActiveId(doc.id);
         addRecentFile(target);
         allowAssetDir(dirName(target));
       } catch (err) {
@@ -319,8 +370,55 @@ function App() {
         await message(`Could not open ${target}:\n${err}`, { title: "Open failed", kind: "error" });
       }
     },
-    [addRecentFile, confirmDiscard, updateRecentFiles],
+    [addRecentFile, updateRecentFiles],
   );
+
+  const newFile = useCallback(() => {
+    const doc = makeDoc();
+    setDocs((prev) => [...prev, doc]);
+    setActiveId(doc.id);
+  }, []);
+
+  const closeTab = useCallback(async (id: string) => {
+    const list = docsRef.current;
+    const doc = list.find((d) => d.id === id);
+    if (!doc) return;
+
+    if (doc.source !== doc.savedSource) {
+      const discard = await ask(`${docName(doc)} has unsaved changes. Close without saving?`, {
+        title: "Unsaved changes",
+        kind: "warning",
+        okLabel: "Discard",
+        cancelLabel: "Cancel",
+      });
+      if (!discard) return;
+    }
+
+    const idx = list.findIndex((d) => d.id === id);
+    const next = list.filter((d) => d.id !== id);
+
+    if (next.length === 0) {
+      // Keep one Untitled document so there's always an editor.
+      const fresh = makeDoc();
+      setDocs([fresh]);
+      setActiveId(fresh.id);
+      return;
+    }
+
+    setDocs(next);
+    if (id === activeIdRef.current) {
+      const neighbor = next[Math.min(idx, next.length - 1)];
+      setActiveId(neighbor.id);
+    }
+  }, []);
+
+  const cycleTab = useCallback((dir: number) => {
+    const list = docsRef.current;
+    if (list.length < 2) return;
+    const i = list.findIndex((d) => d.id === activeIdRef.current);
+    const next = list[(i + dir + list.length) % list.length];
+    setActiveId(next.id);
+  }, []);
 
   const openWorkspace = useCallback(async () => {
     if (!isTauri) {
@@ -342,47 +440,46 @@ function App() {
     }
   }, []);
 
-  const newFile = useCallback(async () => {
-    if (!(await confirmDiscard())) return;
-    setSource(initialSource);
-    setSavedSource(initialSource);
-    setFilePath(null);
-  }, [confirmDiscard]);
-
   const saveFileAs = useCallback(async () => {
     if (!isTauri) {
       window.alert("File open/save needs the desktop app — run `npm run tauri dev`.");
       return false;
     }
+    const id = activeIdRef.current;
+    const doc = docsRef.current.find((d) => d.id === id);
+    if (!doc) return false;
     const target = await saveDialog({
-      defaultPath: stateRef.current.filePath ?? "Untitled.md",
+      defaultPath: doc.filePath ?? withMarkdownExt(doc.tempName || "Untitled"),
       filters: markdownFilters,
     });
     if (!target) return false;
     try {
-      await writeTextFile(target, stateRef.current.source);
-      setSavedSource(stateRef.current.source);
-      setFilePath(target);
+      const latest = docsRef.current.find((d) => d.id === id) ?? doc;
+      await writeTextFile(target, latest.source);
+      patchDoc(id, { filePath: target, savedSource: latest.source });
       addRecentFile(target);
+      allowAssetDir(dirName(target));
       return true;
     } catch (err) {
       await message(`Could not save ${target}:\n${err}`, { title: "Save failed", kind: "error" });
       return false;
     }
-  }, [addRecentFile]);
+  }, [addRecentFile, patchDoc]);
 
   const saveFile = useCallback(async () => {
-    const { filePath: path, source: text } = stateRef.current;
-    if (!path) return saveFileAs();
+    const id = activeIdRef.current;
+    const doc = docsRef.current.find((d) => d.id === id);
+    if (!doc) return false;
+    if (!doc.filePath) return saveFileAs();
     try {
-      await writeTextFile(path, text);
-      setSavedSource(text);
+      await writeTextFile(doc.filePath, doc.source);
+      patchDoc(id, { savedSource: doc.source });
       return true;
     } catch (err) {
-      await message(`Could not save ${path}:\n${err}`, { title: "Save failed", kind: "error" });
+      await message(`Could not save ${doc.filePath}:\n${err}`, { title: "Save failed", kind: "error" });
       return false;
     }
-  }, [saveFileAs]);
+  }, [saveFileAs, patchDoc]);
 
   const exportToPdf = useCallback(async () => {
     if (!isTauri) {
@@ -451,11 +548,62 @@ function App() {
     });
   }, []);
 
+  // Restore previously open file-backed tabs on launch.
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (!isTauri) {
+      hydratedRef.current = true;
+      return;
+    }
+    let cancelled = false;
+    (async () => {
+      try {
+        const raw = localStorage.getItem(TABS_KEY);
+        if (!raw) return;
+        const parsed = JSON.parse(raw) as { openPaths?: string[]; activePath?: string | null };
+        const paths = Array.isArray(parsed.openPaths) ? parsed.openPaths : [];
+        if (paths.length === 0) return;
+
+        const loaded: OpenDoc[] = [];
+        for (const p of paths) {
+          try {
+            const text = await readTextFile(p);
+            loaded.push(makeDoc({ filePath: p, source: text, savedSource: text }));
+            allowAssetDir(dirName(p));
+          } catch {
+            /* file moved or deleted — skip it */
+          }
+        }
+        if (cancelled || loaded.length === 0) return;
+        setDocs(loaded);
+        const active = loaded.find((d) => d.filePath === parsed.activePath) ?? loaded[0];
+        setActiveId(active.id);
+      } catch {
+        /* ignore malformed persistence */
+      } finally {
+        if (!cancelled) hydratedRef.current = true;
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Persist open file-backed tabs (untitled buffers are not restorable).
+  useEffect(() => {
+    if (!hydratedRef.current) return;
+    const openPaths = docs.filter((d) => d.filePath).map((d) => d.filePath as string);
+    localStorage.setItem(
+      TABS_KEY,
+      JSON.stringify({ openPaths, activePath: activeDoc.filePath ?? null }),
+    );
+  }, [docs, activeId, activeDoc.filePath]);
+
   useEffect(() => {
     if (!isTauri) return;
 
     const unlistens = [
-      listen("menu-new", () => void newFile()),
+      listen("menu-new", () => newFile()),
       listen("menu-open", () => void openFile()),
       listen("menu-open-folder", () => void openWorkspace()),
       listen("menu-save", () => void saveFile()),
@@ -491,8 +639,17 @@ function App() {
 
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if (!(e.metaKey || e.ctrlKey) || e.altKey) return;
+      if (!(e.metaKey || e.ctrlKey)) return;
       const key = e.key.toLowerCase();
+
+      // Tab cycling: Ctrl+Tab / Ctrl+Shift+Tab
+      if (key === "tab" && e.ctrlKey) {
+        e.preventDefault();
+        cycleTab(e.shiftKey ? -1 : 1);
+        return;
+      }
+      if (e.altKey) return;
+
       if (key === "o") {
         e.preventDefault();
         void (e.shiftKey ? openWorkspace() : openFile());
@@ -505,11 +662,21 @@ function App() {
       } else if (key === "f") {
         e.preventDefault();
         setShowFindOverlay(true);
+      } else if (key === "n") {
+        e.preventDefault();
+        newFile();
+      } else if (key === "w") {
+        e.preventDefault();
+        void closeTab(activeIdRef.current);
+      } else if (/^[1-9]$/.test(key)) {
+        e.preventDefault();
+        const target = docsRef.current[parseInt(key, 10) - 1];
+        if (target) setActiveId(target.id);
       }
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [newFile, openFile, openWorkspace, saveFile, saveFileAs, insertText]);
+  }, [newFile, openFile, openWorkspace, saveFile, saveFileAs, closeTab, cycleTab]);
 
   useEffect(() => {
     const handleGlobalEsc = (e: KeyboardEvent) => {
@@ -532,9 +699,14 @@ function App() {
     if (!isTauri) return;
     const win = getCurrentWindow();
     const unlisten = win.onCloseRequested(async (event) => {
-      if (!stateRef.current.dirty) return;
+      const dirtyDocs = docsRef.current.filter((d) => d.source !== d.savedSource);
+      if (dirtyDocs.length === 0) return;
       event.preventDefault();
-      const discard = await ask(`${baseName(stateRef.current.filePath ?? "Untitled")} has unsaved changes. Close without saving?`, {
+      const label =
+        dirtyDocs.length === 1
+          ? `${docName(dirtyDocs[0])} has unsaved changes.`
+          : `${dirtyDocs.length} tabs have unsaved changes.`;
+      const discard = await ask(`${label} Close without saving?`, {
         title: "Unsaved changes",
         kind: "warning",
         okLabel: "Discard & Close",
@@ -581,8 +753,8 @@ function App() {
               autoFocus
             />
           ) : (
-            <span 
-              className="toolbar-file" 
+            <span
+              className="toolbar-file"
               title={filePath ?? "Click to rename"}
               onClick={startEditing}
             >
@@ -638,10 +810,11 @@ function App() {
                     role="menuitem"
                     onClick={() => {
                       setFileMenuOpen(false);
-                      void newFile();
+                      newFile();
                     }}
                   >
                     <span>New File</span>
+                    <span className="toolbar-shortcut">⌘N</span>
                   </button>
                 </li>
                 <li>
@@ -723,7 +896,7 @@ function App() {
             >
               <Folder className="activity-icon" size={20} />
             </button>
-            
+
             <button
               className="activity-btn"
               onClick={() => setShowCommandPalette(true)}
@@ -733,7 +906,7 @@ function App() {
               <Search className="activity-icon" size={20} />
             </button>
           </div>
-          
+
           <div className="activity-bar-bottom">
             <button
               className={`activity-btn ${showHelp ? "active" : ""}`}
@@ -743,7 +916,7 @@ function App() {
             >
               <Info className="activity-icon" size={20} />
             </button>
-            
+
             <button
               className="activity-btn"
               onClick={() => {
@@ -773,7 +946,7 @@ function App() {
                 </button>
               </div>
               <div className="sidebar-actions-top">
-                <button className="sidebar-new-note-btn" onClick={() => void newFile()}>
+                <button className="sidebar-new-note-btn" onClick={() => newFile()}>
                   <span className="plus-icon">+</span> New Note
                 </button>
               </div>
@@ -805,19 +978,61 @@ function App() {
           )}
         </aside>
         <main className="editor grow min-h-0">
+          <div className="tab-bar" role="tablist">
+            {docs.map((doc) => {
+              const name = docName(doc);
+              const isActive = doc.id === activeId;
+              const isDirty = doc.source !== doc.savedSource;
+              return (
+                <div
+                  key={doc.id}
+                  role="tab"
+                  aria-selected={isActive}
+                  className={`tab ${isActive ? "active" : ""}`}
+                  title={doc.filePath ?? name}
+                  onClick={() => setActiveId(doc.id)}
+                  onAuxClick={(e) => {
+                    if (e.button === 1) {
+                      e.preventDefault();
+                      void closeTab(doc.id);
+                    }
+                  }}
+                >
+                  <span className="tab-name">{name}</span>
+                  <span className="tab-actions">
+                    {isDirty && <span className="tab-dirty" aria-hidden>●</span>}
+                    <button
+                      className="tab-close"
+                      aria-label={`Close ${name}`}
+                      onClick={(e) => {
+                        e.stopPropagation();
+                        void closeTab(doc.id);
+                      }}
+                    >
+                      <X size={13} strokeWidth={2} />
+                    </button>
+                  </span>
+                </div>
+              );
+            })}
+            <button className="tab-new" aria-label="New tab" title="New tab (⌘N)" onClick={() => newFile()}>
+              <Plus size={15} strokeWidth={2} />
+            </button>
+          </div>
           <div className="editor-layout relative">
             <FindOverlay
               isOpen={showFindOverlay}
               onClose={() => setShowFindOverlay(false)}
               editorView={editorView}
             />
-            
+
             {(viewMode === "both" || viewMode === "editor") && (
-              <div 
-                className="editor-pane" 
+              <div
+                className="editor-pane"
                 style={{ width: viewMode === "both" ? `${editorWidth}%` : "100%" }}
               >
                 <CodeMirror
+                  key={activeId}
                   className="editor-source h-full"
                   value={source}
                   height="100%"
@@ -834,19 +1049,19 @@ function App() {
             )}
 
             {viewMode === "both" && (
-              <div 
+              <div
                 className={`editor-resizer ${isResizing ? "dragging" : ""}`}
                 onMouseDown={() => setIsResizing(true)}
               />
             )}
 
             {(viewMode === "both" || viewMode === "preview") && (
-              <div 
+              <div
                 className="editor-pane"
                 style={{ width: viewMode === "both" ? `${100 - editorWidth}%` : "100%" }}
               >
                 <div className="editor-preview flex h-full flex-1 flex-col border-gray-300 dark:border-gray-800">
-                  <MilkdownEditor markdown={source} className="milkdown-host" onChange={setSource} filePath={filePath} />
+                  <MilkdownEditor key={activeId} markdown={source} className="milkdown-host" onChange={setSource} filePath={filePath} />
                 </div>
               </div>
             )}
